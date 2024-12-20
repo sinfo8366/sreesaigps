@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+<!-- Previous HTML head and style remains same -->
 <head>
     <title>GPS Tracking Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-app-compat.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-database-compat.js"></script>
     <style>
+        /* Previous styles remain same */
         body {
             margin: 0;
             padding: 20px;
@@ -32,6 +34,12 @@
             border: 1px solid #ddd;
             border-radius: 4px;
         }
+        #dateFilter {
+            padding: 8px;
+            margin-right: 10px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
         button {
             padding: 8px 16px;
             background: #4CAF50;
@@ -53,7 +61,8 @@
 </head>
 <body>
     <div class="controls">
-        <button onclick="fetchData()">Load Latest Data</button>
+        <input type="date" id="dateFilter">
+        <button onclick="fetchData()">Load Data</button>
     </div>
     <div class="stats">
         <strong>Statistics:</strong>
@@ -63,17 +72,17 @@
     <div id="dataList"></div>
 
     <script>
-        // Initialize Firebase with your config
+        // Firebase config remains same
         const firebaseConfig = {
             // Replace with your Firebase config
-            apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
-  authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
-  databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "vehicle-tracking-7f1dd",
-  storageBucket: "vehicle-tracking-7f1dd.firebasestorage.app",
-  messagingSenderId: "876631887074",
-  appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
-  measurementId: "G-D6KHE5KT14"
+            	apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
+  		authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
+  		databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
+ 		projectId: "vehicle-tracking-7f1dd",
+  		storageBucket: "vehicle-tracking-7f1dd.firebasestorage.app",
+  		messagingSenderId: "876631887074",
+  		appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
+  		measurementId: "G-D6KHE5KT14"
         };
         
         firebase.initializeApp(firebaseConfig);
@@ -88,6 +97,9 @@
         let markers = [];
         let polyline = null;
 
+        // Set default date to today
+        document.getElementById('dateFilter').valueAsDate = new Date();
+
         async function fetchData() {
             // Clear existing markers and polyline
             markers.forEach(marker => marker.remove());
@@ -96,15 +108,26 @@
                 polyline.remove();
             }
 
-            // Query Firebase for data
-            const gpsRef = database.ref('GPSData'); // Updated to match your structure
-            
+            const selectedDate = new Date(document.getElementById('dateFilter').value);
+            const nextDate = new Date(selectedDate);
+            nextDate.setDate(nextDate.getDate() + 1);
+
+            // Convert to epoch timestamps
+            const startTime = Math.floor(selectedDate.getTime() / 1000);
+            const endTime = Math.floor(nextDate.getTime() / 1000);
+
+            // Query Firebase for data within date range
+            const gpsRef = database.ref('GPSData');
+            const query = gpsRef.orderByChild('timestamp')
+                              .startAt(startTime)
+                              .endAt(endTime);
+
             try {
-                const snapshot = await gpsRef.limitToLast(100).once('value'); // Get last 100 points
+                const snapshot = await query.once('value');
                 const data = snapshot.val();
                 
                 if (!data) {
-                    alert('No GPS data found in database');
+                    alert('No data found for the selected date');
                     return;
                 }
 
@@ -143,6 +166,7 @@
                     // Add marker
                     const marker = L.marker(position)
                         .bindPopup(`
+                            Time: ${point.formatted_time}<br>
                             Lat: ${point.latitude}<br>
                             Long: ${point.longitude}<br>
                             Speed: ${point.speed ? point.speed.toFixed(2) + ' km/h' : 'N/A'}<br>
@@ -156,6 +180,7 @@
                     const div = document.createElement('div');
                     div.className = 'data-point';
                     div.innerHTML = `
+                        Time: ${point.formatted_time}<br>
                         Latitude: ${point.latitude}<br>
                         Longitude: ${point.longitude}<br>
                         Speed: ${point.speed ? point.speed.toFixed(2) + ' km/h' : 'N/A'}<br>
@@ -185,7 +210,7 @@
             }
         }
 
-        // Haversine formula to calculate distance between two points
+        // Haversine formula for distance calculation
         function calculateDistance(lat1, lon1, lat2, lon2) {
             const R = 6371; // Earth's radius in kilometers
             const dLat = toRad(lat2 - lat1);
