@@ -32,12 +32,6 @@
             border: 1px solid #ddd;
             border-radius: 4px;
         }
-        #dateFilter {
-            padding: 8px;
-            margin-right: 10px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-        }
         button {
             padding: 8px 16px;
             background: #4CAF50;
@@ -49,12 +43,21 @@
         button:hover {
             background: #45a049;
         }
+        .stats {
+            margin: 10px 0;
+            padding: 10px;
+            background: #eef;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
     <div class="controls">
-        <input type="date" id="dateFilter">
-        <button onclick="fetchData()">Load Data</button>
+        <button onclick="fetchData()">Load Latest Data</button>
+    </div>
+    <div class="stats">
+        <strong>Statistics:</strong>
+        <div id="statsDisplay"></div>
     </div>
     <div id="map"></div>
     <div id="dataList"></div>
@@ -63,14 +66,14 @@
         // Initialize Firebase with your config
         const firebaseConfig = {
             // Replace with your Firebase config
-            	apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
-  		authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
-  		databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
-  		projectId: "vehicle-tracking-7f1dd",
-  		storageBucket: "vehicle-tracking-7f1dd.firebasestorage.app",
-  		messagingSenderId: "876631887074",
-  		appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
-  		measurementId: "G-D6KHE5KT14"
+            apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
+  authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
+  databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "vehicle-tracking-7f1dd",
+  storageBucket: "vehicle-tracking-7f1dd.firebasestorage.app",
+  messagingSenderId: "876631887074",
+  appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
+  measurementId: "G-D6KHE5KT14"
         };
         
         firebase.initializeApp(firebaseConfig);
@@ -85,9 +88,6 @@
         let markers = [];
         let polyline = null;
 
-        // Set default date to today
-        document.getElementById('dateFilter').valueAsDate = new Date();
-
         async function fetchData() {
             // Clear existing markers and polyline
             markers.forEach(marker => marker.remove());
@@ -96,40 +96,58 @@
                 polyline.remove();
             }
 
-            const selectedDate = new Date(document.getElementById('dateFilter').value);
-            const sevenDaysAgo = new Date(selectedDate);
-            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-            // Query Firebase for data within date range
-            const gpsRef = database.ref('gps_data'); // Adjust path according to your database structure
-            const query = gpsRef.orderByChild('timestamp')
-                              .startAt(sevenDaysAgo.getTime())
-                              .endAt(selectedDate.getTime());
-
+            // Query Firebase for data
+            const gpsRef = database.ref('GPSData'); // Updated to match your structure
+            
             try {
-                const snapshot = await query.once('value');
+                const snapshot = await gpsRef.limitToLast(100).once('value'); // Get last 100 points
                 const data = snapshot.val();
                 
                 if (!data) {
-                    alert('No data found for the selected date range');
+                    alert('No GPS data found in database');
                     return;
                 }
 
                 const coordinates = [];
                 const dataList = document.getElementById('dataList');
                 dataList.innerHTML = '';
+                
+                // Calculate statistics
+                let totalDistance = 0;
+                let prevPoint = null;
+                let maxSpeed = 0;
+                let avgSpeed = 0;
+                let speedCount = 0;
 
                 // Process and display data
                 Object.entries(data).forEach(([key, point]) => {
                     const position = [point.latitude, point.longitude];
                     coordinates.push(position);
 
+                    // Calculate statistics
+                    if (prevPoint) {
+                        const distance = calculateDistance(
+                            prevPoint.latitude, prevPoint.longitude,
+                            point.latitude, point.longitude
+                        );
+                        totalDistance += distance;
+                    }
+                    prevPoint = point;
+
+                    if (point.speed) {
+                        maxSpeed = Math.max(maxSpeed, point.speed);
+                        avgSpeed += point.speed;
+                        speedCount++;
+                    }
+
                     // Add marker
                     const marker = L.marker(position)
                         .bindPopup(`
-                            Time: ${new Date(point.timestamp).toLocaleString()}<br>
                             Lat: ${point.latitude}<br>
-                            Long: ${point.longitude}
+                            Long: ${point.longitude}<br>
+                            Speed: ${point.speed ? point.speed.toFixed(2) + ' km/h' : 'N/A'}<br>
+                            Satellites: ${point.satellites || 'N/A'}<br>
+                            Altitude: ${point.altitude ? point.altitude.toFixed(2) + ' m' : 'N/A'}
                         `)
                         .addTo(map);
                     markers.push(marker);
@@ -138,12 +156,23 @@
                     const div = document.createElement('div');
                     div.className = 'data-point';
                     div.innerHTML = `
-                        Time: ${new Date(point.timestamp).toLocaleString()}<br>
                         Latitude: ${point.latitude}<br>
-                        Longitude: ${point.longitude}
+                        Longitude: ${point.longitude}<br>
+                        Speed: ${point.speed ? point.speed.toFixed(2) + ' km/h' : 'N/A'}<br>
+                        Satellites: ${point.satellites || 'N/A'}<br>
+                        Altitude: ${point.altitude ? point.altitude.toFixed(2) + ' m' : 'N/A'}
                     `;
                     dataList.appendChild(div);
                 });
+
+                // Update statistics display
+                const statsDisplay = document.getElementById('statsDisplay');
+                statsDisplay.innerHTML = `
+                    Total Distance: ${totalDistance.toFixed(2)} km<br>
+                    Max Speed: ${maxSpeed.toFixed(2)} km/h<br>
+                    Average Speed: ${(avgSpeed/speedCount).toFixed(2)} km/h<br>
+                    Total Points: ${coordinates.length}
+                `;
 
                 // Draw path
                 if (coordinates.length > 0) {
@@ -154,6 +183,23 @@
                 console.error('Error fetching data:', error);
                 alert('Error fetching data. Please check console for details.');
             }
+        }
+
+        // Haversine formula to calculate distance between two points
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth's radius in kilometers
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a = 
+                Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        function toRad(deg) {
+            return deg * Math.PI / 180;
         }
 
         // Initial data load
