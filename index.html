@@ -1,234 +1,175 @@
 <!DOCTYPE html>
 <html>
-<!-- Previous HTML head and style remains same -->
 <head>
-    <title>GPS Tracking Dashboard</title>
+    <title>Real-time GPS Tracking</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-app-compat.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-database-compat.js"></script>
     <style>
-        /* Previous styles remain same */
-        body {
-            margin: 0;
-            padding: 20px;
-            font-family: Arial, sans-serif;
+        body { margin: 0; padding: 0; }
+        #map { 
+            position: fixed;
+            height: 100vh;
+            width: 100vw;
         }
-        #map {
-            height: 500px;
-            width: 100%;
-            margin: 20px 0;
-            border-radius: 8px;
-        }
-        .controls {
-            margin-bottom: 20px;
-            padding: 15px;
-            background: #f5f5f5;
-            border-radius: 8px;
-        }
-        .data-point {
-            padding: 10px;
-            margin: 5px 0;
+        .info-panel {
+            position: fixed;
+            top: 10px;
+            right: 10px;
             background: white;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        #dateFilter {
-            padding: 8px;
-            margin-right: 10px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-        }
-        button {
-            padding: 8px 16px;
-            background: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background: #45a049;
-        }
-        .stats {
-            margin: 10px 0;
             padding: 10px;
-            background: #eef;
             border-radius: 4px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+            max-width: 300px;
+        }
+        .latest-point {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+        }
+        .status {
+            padding: 5px;
+            border-radius: 3px;
+            margin-bottom: 5px;
+        }
+        .online {
+            background: #d4edda;
+            color: #155724;
+        }
+        .offline {
+            background: #f8d7da;
+            color: #721c24;
         }
     </style>
 </head>
 <body>
-    <div class="controls">
-        <input type="date" id="dateFilter">
-        <button onclick="fetchData()">Load Data</button>
-    </div>
-    <div class="stats">
-        <strong>Statistics:</strong>
-        <div id="statsDisplay"></div>
-    </div>
     <div id="map"></div>
-    <div id="dataList"></div>
+    <div class="info-panel">
+        <div id="status" class="status">Connecting...</div>
+        <div id="lastUpdate"></div>
+        <div class="latest-point" id="latestPoint"></div>
+    </div>
 
     <script>
-        // Firebase config remains same
+        // Initialize Firebase
         const firebaseConfig = {
             // Replace with your Firebase config
             	apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
   		authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
   		databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
- 		projectId: "vehicle-tracking-7f1dd",
+  		projectId: "vehicle-tracking-7f1dd",
   		storageBucket: "vehicle-tracking-7f1dd.firebasestorage.app",
-  		messagingSenderId: "876631887074",
+ 	 	messagingSenderId: "876631887074",
   		appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
   		measurementId: "G-D6KHE5KT14"
         };
         
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
-        
+
         // Initialize map
         const map = L.map('map').setView([0, 0], 2);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
+
+        // Track current marker and path
+        let currentMarker = null;
+        let pathPolyline = L.polyline([], {color: 'blue'}).addTo(map);
+        let coordinates = [];
+        let lastUpdateTime = 0;
+        const maxPathPoints = 100; // Limit path history
+
+        // Status updates
+        const statusDiv = document.getElementById('status');
+        const lastUpdateDiv = document.getElementById('lastUpdate');
+        const latestPointDiv = document.getElementById('latestPoint');
+
+        // Set up real-time listener
+        const gpsRef = database.ref('GPSData');
         
-        let markers = [];
-        let polyline = null;
+        // Listen for new data
+        gpsRef.limitToLast(1).on('child_added', (snapshot) => {
+            const data = snapshot.val();
+            updateLocation(data);
+        });
 
-        // Set default date to today
-        document.getElementById('dateFilter').valueAsDate = new Date();
+        // Listen for connection state
+        const connectedRef = database.ref('.info/connected');
+        connectedRef.on('value', (snap) => {
+            if (snap.val() === true) {
+                statusDiv.className = 'status online';
+                statusDiv.textContent = 'Connected';
+            } else {
+                statusDiv.className = 'status offline';
+                statusDiv.textContent = 'Offline - Reconnecting...';
+            }
+        });
 
-        async function fetchData() {
-            // Clear existing markers and polyline
-            markers.forEach(marker => marker.remove());
-            markers = [];
-            if (polyline) {
-                polyline.remove();
+        function updateLocation(data) {
+            const position = [data.latitude, data.longitude];
+            
+            // Update marker
+            if (currentMarker) {
+                currentMarker.setLatLng(position);
+            } else {
+                currentMarker = L.marker(position).addTo(map);
             }
 
-            const selectedDate = new Date(document.getElementById('dateFilter').value);
-            const nextDate = new Date(selectedDate);
-            nextDate.setDate(nextDate.getDate() + 1);
-
-            // Convert to epoch timestamps
-            const startTime = Math.floor(selectedDate.getTime() / 1000);
-            const endTime = Math.floor(nextDate.getTime() / 1000);
-
-            // Query Firebase for data within date range
-            const gpsRef = database.ref('GPSData');
-            const query = gpsRef.orderByChild('timestamp')
-                              .startAt(startTime)
-                              .endAt(endTime);
-
-            try {
-                const snapshot = await query.once('value');
-                const data = snapshot.val();
-                
-                if (!data) {
-                    alert('No data found for the selected date');
-                    return;
-                }
-
-                const coordinates = [];
-                const dataList = document.getElementById('dataList');
-                dataList.innerHTML = '';
-                
-                // Calculate statistics
-                let totalDistance = 0;
-                let prevPoint = null;
-                let maxSpeed = 0;
-                let avgSpeed = 0;
-                let speedCount = 0;
-
-                // Process and display data
-                Object.entries(data).forEach(([key, point]) => {
-                    const position = [point.latitude, point.longitude];
-                    coordinates.push(position);
-
-                    // Calculate statistics
-                    if (prevPoint) {
-                        const distance = calculateDistance(
-                            prevPoint.latitude, prevPoint.longitude,
-                            point.latitude, point.longitude
-                        );
-                        totalDistance += distance;
-                    }
-                    prevPoint = point;
-
-                    if (point.speed) {
-                        maxSpeed = Math.max(maxSpeed, point.speed);
-                        avgSpeed += point.speed;
-                        speedCount++;
-                    }
-
-                    // Add marker
-                    const marker = L.marker(position)
-                        .bindPopup(`
-                            Time: ${point.formatted_time}<br>
-                            Lat: ${point.latitude}<br>
-                            Long: ${point.longitude}<br>
-                            Speed: ${point.speed ? point.speed.toFixed(2) + ' km/h' : 'N/A'}<br>
-                            Satellites: ${point.satellites || 'N/A'}<br>
-                            Altitude: ${point.altitude ? point.altitude.toFixed(2) + ' m' : 'N/A'}
-                        `)
-                        .addTo(map);
-                    markers.push(marker);
-
-                    // Add to list
-                    const div = document.createElement('div');
-                    div.className = 'data-point';
-                    div.innerHTML = `
-                        Time: ${point.formatted_time}<br>
-                        Latitude: ${point.latitude}<br>
-                        Longitude: ${point.longitude}<br>
-                        Speed: ${point.speed ? point.speed.toFixed(2) + ' km/h' : 'N/A'}<br>
-                        Satellites: ${point.satellites || 'N/A'}<br>
-                        Altitude: ${point.altitude ? point.altitude.toFixed(2) + ' m' : 'N/A'}
-                    `;
-                    dataList.appendChild(div);
-                });
-
-                // Update statistics display
-                const statsDisplay = document.getElementById('statsDisplay');
-                statsDisplay.innerHTML = `
-                    Total Distance: ${totalDistance.toFixed(2)} km<br>
-                    Max Speed: ${maxSpeed.toFixed(2)} km/h<br>
-                    Average Speed: ${(avgSpeed/speedCount).toFixed(2)} km/h<br>
-                    Total Points: ${coordinates.length}
-                `;
-
-                // Draw path
-                if (coordinates.length > 0) {
-                    polyline = L.polyline(coordinates, {color: 'blue'}).addTo(map);
-                    map.fitBounds(polyline.getBounds());
-                }
-            } catch (error) {
-                console.error('Error fetching data:', error);
-                alert('Error fetching data. Please check console for details.');
+            // Update path
+            coordinates.push(position);
+            if (coordinates.length > maxPathPoints) {
+                coordinates.shift(); // Remove oldest point
             }
+            pathPolyline.setLatLngs(coordinates);
+
+            // Pan map to new location
+            map.panTo(position);
+
+            // Update info panel
+            const timestamp = new Date().toLocaleTimeString();
+            lastUpdateDiv.textContent = `Last Update: ${timestamp}`;
+            
+            latestPointDiv.innerHTML = `
+                Latitude: ${data.latitude.toFixed(6)}<br>
+                Longitude: ${data.longitude.toFixed(6)}<br>
+                Speed: ${data.speed ? data.speed.toFixed(2) + ' km/h' : 'N/A'}<br>
+                Satellites: ${data.satellites || 'N/A'}<br>
+                Altitude: ${data.altitude ? data.altitude.toFixed(2) + ' m' : 'N/A'}
+            `;
+
+            // Auto zoom on first point
+            if (coordinates.length === 1) {
+                map.setView(position, 15);
+            }
+
+            lastUpdateTime = Date.now();
         }
 
-        // Haversine formula for distance calculation
-        function calculateDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371; // Earth's radius in kilometers
-            const dLat = toRad(lat2 - lat1);
-            const dLon = toRad(lon2 - lon1);
-            const a = 
-                Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c;
-        }
+        // Check for stale data
+        setInterval(() => {
+            const timeSinceUpdate = Date.now() - lastUpdateTime;
+            if (lastUpdateTime && timeSinceUpdate > 30000) { // 30 seconds
+                statusDiv.className = 'status offline';
+                statusDiv.textContent = 'No updates received recently';
+            }
+        }, 5000);
 
-        function toRad(deg) {
-            return deg * Math.PI / 180;
-        }
-
-        // Initial data load
-        fetchData();
+        // Load initial path
+        gpsRef.limitToLast(maxPathPoints).once('value', (snapshot) => {
+            snapshot.forEach((childSnapshot) => {
+                const data = childSnapshot.val();
+                coordinates.push([data.latitude, data.longitude]);
+            });
+            if (coordinates.length > 0) {
+                pathPolyline.setLatLngs(coordinates);
+                map.fitBounds(pathPolyline.getBounds());
+            }
+        });
     </script>
 </body>
 </html>
