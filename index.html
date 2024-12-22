@@ -31,6 +31,10 @@
             border-radius: 4px;
             cursor: pointer;
         }
+        #status {
+            margin-top: 10px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -38,6 +42,7 @@
         <input type="datetime-local" id="startTime">
         <input type="datetime-local" id="endTime">
         <button onclick="loadHistory()">Show History</button>
+        <div id="status"></div>
     </div>
     <div id="map"></div>
 
@@ -58,6 +63,11 @@
         // Create marker and path
         let marker = L.marker([9.436471333, 77.567925667]).addTo(map);
         let path = L.polyline([], {color: 'red', weight: 3}).addTo(map);
+        
+        // Status display function
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
 
         // Real-time updates
         const gpsRef = firebase.database().ref('GPSData');
@@ -65,47 +75,58 @@
             const data = snapshot.val();
             const position = [data.latitude, data.longitude];
             
-            // Update marker
             marker.setLatLng(position);
             marker.bindPopup(`
-                Lat: ${data.latitude}<br>
-                Lng: ${data.longitude}<br>
+                Lat: ${data.latitude.toFixed(6)}<br>
+                Lng: ${data.longitude.toFixed(6)}<br>
                 Alt: ${data.altitude}m<br>
                 Speed: ${data.speed}km/h<br>
                 Satellites: ${data.satellites}
-            `);
+            `).openPopup();
             
-            // Pan map to new position
             map.panTo(position);
         });
 
         // Load historical data
         function loadHistory() {
+            updateStatus('Loading historical data...');
+            path.setLatLngs([]); // Clear existing path
+            
             const startTime = new Date(document.getElementById('startTime').value).getTime();
             const endTime = new Date(document.getElementById('endTime').value).getTime();
 
-            gpsRef.orderByChild('timestamp')
-                .startAt(startTime)
-                .endAt(endTime)
+            // Query Firebase for the specific time range
+            gpsRef.orderByKey()  // Using orderByKey since your paths use timestamps as keys
+                .startAt(startTime.toString())
+                .endAt(endTime.toString())
                 .once('value')
                 .then((snapshot) => {
                     const points = [];
+                    let count = 0;
+                    
                     snapshot.forEach((childSnapshot) => {
                         const data = childSnapshot.val();
-                        points.push([data.latitude, data.longitude]);
+                        if (data.latitude && data.longitude) {
+                            points.push([data.latitude, data.longitude]);
+                            count++;
+                        }
                     });
                     
-                    // Update path
-                    path.setLatLngs(points);
-                    
-                    // Fit map to path
                     if (points.length > 0) {
+                        path.setLatLngs(points);
                         map.fitBounds(path.getBounds());
+                        updateStatus(`Loaded ${count} points from history`);
+                    } else {
+                        updateStatus('No data found for selected time range');
                     }
+                })
+                .catch((error) => {
+                    console.error('Error loading historical data:', error);
+                    updateStatus('Error loading historical data');
                 });
         }
 
-        // Set default time range
+        // Set default time range (last 24 hours)
         const now = new Date();
         const yesterday = new Date(now - 24*60*60*1000);
         document.getElementById('startTime').value = yesterday.toISOString().slice(0,16);
