@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-app-compat.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-database-compat.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <style>
         body { 
             margin: 0; 
@@ -26,36 +24,48 @@
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .date-range {
+            display: flex;
+            gap: 10px;
+            align-items: center;
         }
         input[type="date"] {
             padding: 8px;
-            margin-right: 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
         }
         button {
             padding: 8px 16px;
-            margin: 0 4px;
             background: #4CAF50;
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: background 0.3s;
         }
         button:hover {
             background: #45a049;
         }
         .active {
-            background: #2E7D32;
+            background: #2196F3;
         }
     </style>
 </head>
 <body>
     <div class="controls">
-        <input type="date" id="dateFilter">
-        <button id="historicalBtn" onclick="loadHistoricalData()">Historical</button>
-        <button id="liveBtn" onclick="showLive()" class="active">Live</button>
+        <div class="date-range">
+            <input type="date" id="startDate">
+            <span>to</span>
+            <input type="date" id="endDate">
+        </div>
+        <div>
+            <button onclick="showHistorical()" id="historicalBtn">Show Historical</button>
+            <button onclick="showLive()" id="liveBtn" class="active">Live Track</button>
+        </div>
     </div>
     <div id="map"></div>
 
@@ -75,43 +85,24 @@
         const database = firebase.database();
 
         let map;
-        let marker;
-        let currentListener;
-        let pathLine;
-
-        // Custom marker icon
-        const markerIcon = L.divIcon({
-            html: '<div style="background-color: #4CAF50; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white;"></div>',
-            className: 'custom-marker',
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
-        });
+        let marker = null;
+        let path = null;
+        let currentListener = null;
 
         function initMap() {
-            // Initialize map with a default center
-            map = L.map('map').setView([0, 0], 15);
-            
-            // Add OpenStreetMap tile layer
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap contributors',
-                maxZoom: 19
-            }).addTo(map);
-
+            map = new google.maps.Map(document.getElementById('map'), {
+                zoom: 15,
+                center: { lat: 0, lng: 0 },
+                mapTypeId: 'roadmap'
+            });
             showLive();
         }
 
         function showLive() {
-            // Update button states
+            clearMap();
             document.getElementById('liveBtn').classList.add('active');
             document.getElementById('historicalBtn').classList.remove('active');
-            
-            // Clear historical path if exists
-            if (pathLine) {
-                map.removeLayer(pathLine);
-                pathLine = null;
-            }
 
-            // Remove existing listener
             if (currentListener) {
                 currentListener();
             }
@@ -123,75 +114,101 @@
             });
         }
 
-        function loadHistoricalData() {
-            // Update button states
+        function showHistorical() {
+            clearMap();
             document.getElementById('historicalBtn').classList.add('active');
             document.getElementById('liveBtn').classList.remove('active');
 
-            const selectedDate = new Date(document.getElementById('dateFilter').value);
-            const nextDate = new Date(selectedDate);
-            nextDate.setDate(nextDate.getDate() + 1);
+            const startDate = new Date(document.getElementById('startDate').value);
+            const endDate = new Date(document.getElementById('endDate').value);
+            endDate.setDate(endDate.getDate() + 1);
 
-            const startTime = Math.floor(selectedDate.getTime() / 1000);
-            const endTime = Math.floor(nextDate.getTime() / 1000);
+            const startTime = Math.floor(startDate.getTime() / 1000);
+            const endTime = Math.floor(endDate.getTime() / 1000);
 
-            // Remove live listener
             if (currentListener) {
                 currentListener();
             }
 
-            // Clear existing path
-            if (pathLine) {
-                map.removeLayer(pathLine);
-            }
-
             const gpsRef = database.ref('GPSData');
             gpsRef.orderByChild('timestamp')
-                  .startAt(startTime)
-                  .endAt(endTime)
-                  .once('value', (snapshot) => {
-                      const coordinates = [];
-                      snapshot.forEach((childSnapshot) => {
-                          const data = childSnapshot.val();
-                          coordinates.push([
-                              parseFloat(data.latitude),
-                              parseFloat(data.longitude)
-                          ]);
-                      });
+                .startAt(startTime)
+                .endAt(endTime)
+                .once('value', (snapshot) => {
+                    const coordinates = [];
+                    snapshot.forEach((childSnapshot) => {
+                        const data = childSnapshot.val();
+                        coordinates.push({
+                            lat: parseFloat(data.latitude),
+                            lng: parseFloat(data.longitude)
+                        });
+                    });
 
-                      if (coordinates.length > 0) {
-                          // Draw path line
-                          pathLine = L.polyline(coordinates, {
-                              color: '#FF0000',
-                              weight: 3,
-                              opacity: 0.8
-                          }).addTo(map);
+                    if (coordinates.length > 0) {
+                        // Draw path
+                        path = new google.maps.Polyline({
+                            path: coordinates,
+                            geodesic: true,
+                            strokeColor: '#2196F3',
+                            strokeOpacity: 1.0,
+                            strokeWeight: 3
+                        });
+                        path.setMap(map);
 
-                          // Update marker to last position
-                          const lastPos = coordinates[coordinates.length - 1];
-                          updateMarker(lastPos[0], lastPos[1]);
+                        // Place marker at last position
+                        updateMarker(
+                            coordinates[coordinates.length - 1].lat,
+                            coordinates[coordinates.length - 1].lng
+                        );
 
-                          // Fit map to path
-                          map.fitBounds(pathLine.getBounds());
-                      }
-                  });
+                        // Fit map to path
+                        const bounds = new google.maps.LatLngBounds();
+                        coordinates.forEach(coord => bounds.extend(coord));
+                        map.fitBounds(bounds);
+                    }
+                });
+        }
+
+        function clearMap() {
+            if (path) {
+                path.setMap(null);
+                path = null;
+            }
         }
 
         function updateMarker(lat, lng) {
+            const position = { lat: parseFloat(lat), lng: parseFloat(lng) };
+            
             if (!marker) {
-                marker = L.marker([lat, lng], {icon: markerIcon}).addTo(map);
+                marker = new google.maps.Marker({
+                    position: position,
+                    map: map,
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 8,
+                        fillColor: '#2196F3',
+                        fillOpacity: 1,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 2
+                    }
+                });
             } else {
-                marker.setLatLng([lat, lng]);
+                marker.setPosition(position);
             }
             
-            map.panTo([lat, lng]);
+            map.panTo(position);
         }
 
-        // Initialize the map when the page loads
-        document.addEventListener('DOMContentLoaded', initMap);
-
-        // Set default date to today
-        document.getElementById('dateFilter').valueAsDate = new Date();
+        // Set default dates
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        document.getElementById('startDate').valueAsDate = yesterday;
+        document.getElementById('endDate').valueAsDate = today;
+    </script>
+    <script async defer
+        src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY&callback=initMap">
     </script>
 </body>
 </html>
