@@ -76,6 +76,7 @@
         let polyline = null;
         let currentListener = null;
 
+        // Function to update marker position
         function updateMarker(lat, lng) {
             if (!marker) {
                 marker = L.marker([lat, lng]).addTo(map);
@@ -85,6 +86,7 @@
             map.setView([lat, lng], 15); // Center the map
         }
 
+        // Function to show live GPS tracking
         function showLive() {
             if (currentListener) currentListener(); // Remove existing listener
 
@@ -95,17 +97,25 @@
             });
         }
 
+        // Function to load historical data for the selected date
         function loadHistoricalData() {
             const selectedDate = new Date(document.getElementById('dateFilter').value);
-            const nextDate = new Date(selectedDate);
-            nextDate.setDate(nextDate.getDate() + 1);
 
-            const startTime = Math.floor(selectedDate.getTime() / 1000);
-            const endTime = Math.floor(nextDate.getTime() / 1000);
+            // Validate the selected date
+            if (!selectedDate) {
+                alert("Please select a valid date.");
+                return;
+            }
 
-            if (currentListener) currentListener(); // Remove live listener
-            if (polyline) map.removeLayer(polyline); // Clear existing polyline
+            // Set the time range for the selected date
+            const startTime = Math.floor(new Date(selectedDate.setHours(0, 0, 0, 0)).getTime() / 1000);
+            const endTime = Math.floor(new Date(selectedDate.setHours(23, 59, 59, 999)).getTime() / 1000);
 
+            // Remove live listener and existing polyline
+            if (currentListener) currentListener();
+            if (polyline) map.removeLayer(polyline);
+
+            // Query Firebase for data within the time range
             const gpsRef = database.ref('GPSData');
             gpsRef.orderByChild('timestamp')
                   .startAt(startTime)
@@ -118,15 +128,21 @@
                       });
 
                       if (pathCoordinates.length > 0) {
+                          // Draw polyline for the historical path
                           polyline = L.polyline(pathCoordinates, { color: 'red' }).addTo(map);
+
+                          // Update marker to the last known position
                           const lastPosition = pathCoordinates[pathCoordinates.length - 1];
                           updateMarker(lastPosition[0], lastPosition[1]);
+                      } else {
+                          alert("No data available for the selected date.");
                       }
                   });
         }
 
+        // Set default date to today and start with live tracking
         document.getElementById('dateFilter').valueAsDate = new Date();
-        showLive(); // Start with live tracking
+        showLive();
     </script>
 </body>
 </html>
