@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GPS Tracking</title>
+    <title>Simple GPS Tracking</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-app-compat.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-database-compat.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <style>
         body { 
             margin: 0; 
@@ -17,45 +17,50 @@
             height: 100vh;
             width: 100vw;
         }
-        .date-selector {
+        .controls {
             position: fixed;
             top: 10px;
-            left: 50px;
+            left: 10px;
             background: white;
-            padding: 10px;
-            border-radius: 4px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             z-index: 1000;
         }
         input[type="date"] {
-            padding: 5px;
-            margin-right: 5px;
+            padding: 8px;
+            margin-right: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
         }
         button {
-            padding: 5px 10px;
+            padding: 8px 16px;
+            margin: 0 4px;
             background: #4CAF50;
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            transition: background 0.2s;
         }
         button:hover {
             background: #45a049;
         }
+        .active {
+            background: #2E7D32;
+        }
     </style>
 </head>
 <body>
-    <div class="date-selector">
+    <div class="controls">
         <input type="date" id="dateFilter">
-        <button onclick="loadHistoricalData()">Historical</button>
-        <button onclick="showLive()">Live</button>
+        <button id="historicalBtn" onclick="loadHistoricalData()">Historical</button>
+        <button id="liveBtn" onclick="showLive()" class="active">Live</button>
     </div>
     <div id="map"></div>
 
     <script>
-        // Initialize Firebase
         const firebaseConfig = {
-            // Replace with your Firebase config
             apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
   authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
   databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
@@ -69,23 +74,48 @@
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
 
-        // Initialize map
-        const map = L.map('map').setView([0, 0], 2);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+        let map;
+        let marker;
+        let currentListener;
+        let pathLine;
 
-        let marker = null;
-        let currentListener = null;
+        // Custom marker icon
+        const markerIcon = L.divIcon({
+            html: '<div style="background-color: #4CAF50; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white;"></div>',
+            className: 'custom-marker',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+        });
 
-        // Show live tracking
+        function initMap() {
+            // Initialize map with a default center
+            map = L.map('map').setView([0, 0], 15);
+            
+            // Add OpenStreetMap tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
+
+            showLive();
+        }
+
         function showLive() {
-            // Remove any existing listener
-            if (currentListener) {
-                database.ref('GPSData').off('child_added', currentListener);
+            // Update button states
+            document.getElementById('liveBtn').classList.add('active');
+            document.getElementById('historicalBtn').classList.remove('active');
+            
+            // Clear historical path if exists
+            if (pathLine) {
+                map.removeLayer(pathLine);
+                pathLine = null;
             }
 
-            // Set up real-time listener
+            // Remove existing listener
+            if (currentListener) {
+                currentListener();
+            }
+
             const gpsRef = database.ref('GPSData');
             currentListener = gpsRef.limitToLast(1).on('child_added', (snapshot) => {
                 const data = snapshot.val();
@@ -93,53 +123,75 @@
             });
         }
 
-        // Load historical data
         function loadHistoricalData() {
+            // Update button states
+            document.getElementById('historicalBtn').classList.add('active');
+            document.getElementById('liveBtn').classList.remove('active');
+
             const selectedDate = new Date(document.getElementById('dateFilter').value);
             const nextDate = new Date(selectedDate);
             nextDate.setDate(nextDate.getDate() + 1);
 
-            // Convert to epoch timestamps
             const startTime = Math.floor(selectedDate.getTime() / 1000);
             const endTime = Math.floor(nextDate.getTime() / 1000);
 
-            // Remove live listener if exists
+            // Remove live listener
             if (currentListener) {
-                database.ref('GPSData').off('child_added', currentListener);
+                currentListener();
             }
 
-            // Query Firebase for selected date
+            // Clear existing path
+            if (pathLine) {
+                map.removeLayer(pathLine);
+            }
+
             const gpsRef = database.ref('GPSData');
             gpsRef.orderByChild('timestamp')
                   .startAt(startTime)
                   .endAt(endTime)
-                  .limitToLast(1)
                   .once('value', (snapshot) => {
+                      const coordinates = [];
                       snapshot.forEach((childSnapshot) => {
                           const data = childSnapshot.val();
-                          updateMarker(data.latitude, data.longitude);
+                          coordinates.push([
+                              parseFloat(data.latitude),
+                              parseFloat(data.longitude)
+                          ]);
                       });
+
+                      if (coordinates.length > 0) {
+                          // Draw path line
+                          pathLine = L.polyline(coordinates, {
+                              color: '#FF0000',
+                              weight: 3,
+                              opacity: 0.8
+                          }).addTo(map);
+
+                          // Update marker to last position
+                          const lastPos = coordinates[coordinates.length - 1];
+                          updateMarker(lastPos[0], lastPos[1]);
+
+                          // Fit map to path
+                          map.fitBounds(pathLine.getBounds());
+                      }
                   });
         }
 
-        // Update marker position
         function updateMarker(lat, lng) {
-            const position = [parseFloat(lat), parseFloat(lng)];
-            
             if (!marker) {
-                marker = L.marker(position).addTo(map);
+                marker = L.marker([lat, lng], {icon: markerIcon}).addTo(map);
             } else {
-                marker.setLatLng(position);
+                marker.setLatLng([lat, lng]);
             }
             
-            map.setView(position, 15);
+            map.panTo([lat, lng]);
         }
+
+        // Initialize the map when the page loads
+        document.addEventListener('DOMContentLoaded', initMap);
 
         // Set default date to today
         document.getElementById('dateFilter').valueAsDate = new Date();
-
-        // Start with live tracking
-        showLive();
     </script>
 </body>
 </html>
