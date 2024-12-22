@@ -3,6 +3,8 @@
 <head>
     <title>Simple GPS Tracking</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-app-compat.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-database-compat.js"></script>
     <style>
@@ -86,15 +88,18 @@
 
         let map;
         let marker = null;
-        let path = null;
+        let polyline = null;
         let currentListener = null;
 
         function initMap() {
-            map = new google.maps.Map(document.getElementById('map'), {
-                zoom: 15,
-                center: { lat: 0, lng: 0 },
-                mapTypeId: 'roadmap'
-            });
+            // Initialize map with a default center
+            map = L.map('map').setView([0, 0], 13);
+            
+            // Add OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
             showLive();
         }
 
@@ -138,62 +143,49 @@
                     const coordinates = [];
                     snapshot.forEach((childSnapshot) => {
                         const data = childSnapshot.val();
-                        coordinates.push({
-                            lat: parseFloat(data.latitude),
-                            lng: parseFloat(data.longitude)
-                        });
+                        coordinates.push([
+                            parseFloat(data.latitude),
+                            parseFloat(data.longitude)
+                        ]);
                     });
 
                     if (coordinates.length > 0) {
                         // Draw path
-                        path = new google.maps.Polyline({
-                            path: coordinates,
-                            geodesic: true,
-                            strokeColor: '#2196F3',
-                            strokeOpacity: 1.0,
-                            strokeWeight: 3
-                        });
-                        path.setMap(map);
+                        polyline = L.polyline(coordinates, {
+                            color: '#2196F3',
+                            weight: 3
+                        }).addTo(map);
 
                         // Place marker at last position
-                        updateMarker(
-                            coordinates[coordinates.length - 1].lat,
-                            coordinates[coordinates.length - 1].lng
-                        );
+                        const lastPos = coordinates[coordinates.length - 1];
+                        updateMarker(lastPos[0], lastPos[1]);
 
                         // Fit map to path
-                        const bounds = new google.maps.LatLngBounds();
-                        coordinates.forEach(coord => bounds.extend(coord));
-                        map.fitBounds(bounds);
+                        map.fitBounds(polyline.getBounds());
                     }
                 });
         }
 
         function clearMap() {
-            if (path) {
-                path.setMap(null);
-                path = null;
+            if (polyline) {
+                map.removeLayer(polyline);
+                polyline = null;
             }
         }
 
         function updateMarker(lat, lng) {
-            const position = { lat: parseFloat(lat), lng: parseFloat(lng) };
+            const position = [parseFloat(lat), parseFloat(lng)];
             
             if (!marker) {
-                marker = new google.maps.Marker({
-                    position: position,
-                    map: map,
-                    icon: {
-                        path: google.maps.SymbolPath.CIRCLE,
-                        scale: 8,
-                        fillColor: '#2196F3',
-                        fillOpacity: 1,
-                        strokeColor: '#ffffff',
-                        strokeWeight: 2
-                    }
-                });
+                marker = L.circleMarker(position, {
+                    radius: 8,
+                    fillColor: '#2196F3',
+                    fillOpacity: 1,
+                    color: '#ffffff',
+                    weight: 2
+                }).addTo(map);
             } else {
-                marker.setPosition(position);
+                marker.setLatLng(position);
             }
             
             map.panTo(position);
@@ -206,9 +198,9 @@
         
         document.getElementById('startDate').valueAsDate = yesterday;
         document.getElementById('endDate').valueAsDate = today;
-    </script>
-    <script async defer
-        src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY&callback=initMap">
+
+        // Initialize map
+        initMap();
     </script>
 </body>
 </html>
