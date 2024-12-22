@@ -1,148 +1,115 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GPS Tracking</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <title>GPS Tracker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-app-compat.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-database-compat.js"></script>
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-        }
-        #map {
-            height: 100vh;
-            width: 100vw;
-        }
-        .date-selector {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: white;
-            padding: 10px;
+        #map { 
+            height: 500px; 
+            margin: 10px 0; 
+            border: 2px solid #ccc;
             border-radius: 4px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            z-index: 1000;
         }
-        input[type="date"], button {
+        .controls {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+        input[type="datetime-local"] {
             padding: 5px;
-            margin-right: 5px;
+            margin-right: 10px;
         }
         button {
+            padding: 5px 15px;
             background: #4CAF50;
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
         }
-        button:hover {
-            background: #45a049;
-        }
     </style>
 </head>
 <body>
-    <div class="date-selector">
-        <input type="date" id="dateFilter">
-        <button onclick="loadHistoricalData()">Show Historical</button>
-        <button onclick="showLive()">Show Live</button>
+    <div class="controls">
+        <input type="datetime-local" id="startTime">
+        <input type="datetime-local" id="endTime">
+        <button onclick="loadHistory()">Show History</button>
     </div>
     <div id="map"></div>
 
     <script>
         // Initialize Firebase
         const firebaseConfig = {
-            apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
-  authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
-  databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "vehicle-tracking-7f1dd",
-  storageBucket: "vehicle-tracking-7f1dd.firebasestorage.app",
-  messagingSenderId: "876631887074",
-  appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
-  measurementId: "G-D6KHE5KT14"
+            // Replace with your Firebase config
+            databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app"
         };
         firebase.initializeApp(firebaseConfig);
-        const database = firebase.database();
 
-        let map = L.map('map').setView([0, 0], 13); // Initial map view
+        // Initialize map
+        const map = L.map('map').setView([9.436471333, 77.567925667], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap contributors'
+            attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        let marker = null;
-        let polyline = null;
-        let currentListener = null;
+        // Create marker and path
+        let marker = L.marker([9.436471333, 77.567925667]).addTo(map);
+        let path = L.polyline([], {color: 'red', weight: 3}).addTo(map);
 
-        // Function to update marker position
-        function updateMarker(lat, lng) {
-            if (!marker) {
-                marker = L.marker([lat, lng]).addTo(map);
-            } else {
-                marker.setLatLng([lat, lng]);
-            }
-            map.setView([lat, lng], 15); // Center the map
-        }
+        // Real-time updates
+        const gpsRef = firebase.database().ref('GPSData');
+        gpsRef.limitToLast(1).on('child_added', (snapshot) => {
+            const data = snapshot.val();
+            const position = [data.latitude, data.longitude];
+            
+            // Update marker
+            marker.setLatLng(position);
+            marker.bindPopup(`
+                Lat: ${data.latitude}<br>
+                Lng: ${data.longitude}<br>
+                Alt: ${data.altitude}m<br>
+                Speed: ${data.speed}km/h<br>
+                Satellites: ${data.satellites}
+            `);
+            
+            // Pan map to new position
+            map.panTo(position);
+        });
 
-        // Function to show live GPS tracking
-        function showLive() {
-            if (currentListener) currentListener(); // Remove existing listener
+        // Load historical data
+        function loadHistory() {
+            const startTime = new Date(document.getElementById('startTime').value).getTime();
+            const endTime = new Date(document.getElementById('endTime').value).getTime();
 
-            const gpsRef = database.ref('GPSData');
-            currentListener = gpsRef.limitToLast(1).on('child_added', (snapshot) => {
-                const data = snapshot.val();
-                updateMarker(data.latitude, data.longitude);
-            });
-        }
-
-        // Function to load historical data for the selected date
-        function loadHistoricalData() {
-            const selectedDate = new Date(document.getElementById('dateFilter').value);
-
-            // Validate the selected date
-            if (!selectedDate) {
-                alert("Please select a valid date.");
-                return;
-            }
-
-            // Set the time range for the selected date
-            const startTime = Math.floor(new Date(selectedDate.setHours(0, 0, 0, 0)).getTime() / 1000);
-            const endTime = Math.floor(new Date(selectedDate.setHours(23, 59, 59, 999)).getTime() / 1000);
-
-            // Remove live listener and existing polyline
-            if (currentListener) currentListener();
-            if (polyline) map.removeLayer(polyline);
-
-            // Query Firebase for data within the time range
-            const gpsRef = database.ref('GPSData');
             gpsRef.orderByChild('timestamp')
-                  .startAt(startTime)
-                  .endAt(endTime)
-                  .once('value', (snapshot) => {
-                      const pathCoordinates = [];
-                      snapshot.forEach((childSnapshot) => {
-                          const data = childSnapshot.val();
-                          pathCoordinates.push([data.latitude, data.longitude]);
-                      });
-
-                      if (pathCoordinates.length > 0) {
-                          // Draw polyline for the historical path
-                          polyline = L.polyline(pathCoordinates, { color: 'red' }).addTo(map);
-
-                          // Update marker to the last known position
-                          const lastPosition = pathCoordinates[pathCoordinates.length - 1];
-                          updateMarker(lastPosition[0], lastPosition[1]);
-                      } else {
-                          alert("No data available for the selected date.");
-                      }
-                  });
+                .startAt(startTime)
+                .endAt(endTime)
+                .once('value')
+                .then((snapshot) => {
+                    const points = [];
+                    snapshot.forEach((childSnapshot) => {
+                        const data = childSnapshot.val();
+                        points.push([data.latitude, data.longitude]);
+                    });
+                    
+                    // Update path
+                    path.setLatLngs(points);
+                    
+                    // Fit map to path
+                    if (points.length > 0) {
+                        map.fitBounds(path.getBounds());
+                    }
+                });
         }
 
-        // Set default date to today and start with live tracking
-        document.getElementById('dateFilter').valueAsDate = new Date();
-        showLive();
+        // Set default time range
+        const now = new Date();
+        const yesterday = new Date(now - 24*60*60*1000);
+        document.getElementById('startTime').value = yesterday.toISOString().slice(0,16);
+        document.getElementById('endTime').value = now.toISOString().slice(0,16);
     </script>
 </body>
 </html>
