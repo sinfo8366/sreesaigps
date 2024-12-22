@@ -1,71 +1,69 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Real-time GPS Tracking</title>
+    <title>GPS Tracking</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-app-compat.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-database-compat.js"></script>
     <style>
-        body { margin: 0; padding: 0; }
+        body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: Arial, sans-serif;
+        }
         #map { 
-            position: fixed;
             height: 100vh;
             width: 100vw;
         }
-        .info-panel {
+        .date-selector {
             position: fixed;
             top: 10px;
-            right: 10px;
+            left: 50px;
             background: white;
             padding: 10px;
             border-radius: 4px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
             z-index: 1000;
-            max-width: 300px;
         }
-        .latest-point {
-            margin-top: 10px;
-            padding: 10px;
-            background: #f0f0f0;
-            border-radius: 4px;
-        }
-        .status {
+        input[type="date"] {
             padding: 5px;
-            border-radius: 3px;
-            margin-bottom: 5px;
+            margin-right: 5px;
         }
-        .online {
-            background: #d4edda;
-            color: #155724;
+        button {
+            padding: 5px 10px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
         }
-        .offline {
-            background: #f8d7da;
-            color: #721c24;
+        button:hover {
+            background: #45a049;
         }
     </style>
 </head>
 <body>
-    <div id="map"></div>
-    <div class="info-panel">
-        <div id="status" class="status">Connecting...</div>
-        <div id="lastUpdate"></div>
-        <div class="latest-point" id="latestPoint"></div>
+    <div class="date-selector">
+        <input type="date" id="dateFilter">
+        <button onclick="loadHistoricalData()">Historical</button>
+        <button onclick="showLive()">Live</button>
     </div>
+    <div id="map"></div>
 
     <script>
         // Initialize Firebase
         const firebaseConfig = {
             // Replace with your Firebase config
-            	apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
-  		authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
-  		databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
-  		projectId: "vehicle-tracking-7f1dd",
-  		storageBucket: "vehicle-tracking-7f1dd.firebasestorage.app",
- 	 	messagingSenderId: "876631887074",
-  		appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
-  		measurementId: "G-D6KHE5KT14"
+            apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
+  authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
+  databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "vehicle-tracking-7f1dd",
+  storageBucket: "vehicle-tracking-7f1dd.firebasestorage.app",
+  messagingSenderId: "876631887074",
+  appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
+  measurementId: "G-D6KHE5KT14"
         };
         
         firebase.initializeApp(firebaseConfig);
@@ -77,99 +75,71 @@
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        // Track current marker and path
-        let currentMarker = null;
-        let pathPolyline = L.polyline([], {color: 'blue'}).addTo(map);
-        let coordinates = [];
-        let lastUpdateTime = 0;
-        const maxPathPoints = 100; // Limit path history
+        let marker = null;
+        let currentListener = null;
 
-        // Status updates
-        const statusDiv = document.getElementById('status');
-        const lastUpdateDiv = document.getElementById('lastUpdate');
-        const latestPointDiv = document.getElementById('latestPoint');
-
-        // Set up real-time listener
-        const gpsRef = database.ref('GPSData');
-        
-        // Listen for new data
-        gpsRef.limitToLast(1).on('child_added', (snapshot) => {
-            const data = snapshot.val();
-            updateLocation(data);
-        });
-
-        // Listen for connection state
-        const connectedRef = database.ref('.info/connected');
-        connectedRef.on('value', (snap) => {
-            if (snap.val() === true) {
-                statusDiv.className = 'status online';
-                statusDiv.textContent = 'Connected';
-            } else {
-                statusDiv.className = 'status offline';
-                statusDiv.textContent = 'Offline - Reconnecting...';
-            }
-        });
-
-        function updateLocation(data) {
-            const position = [data.latitude, data.longitude];
-            
-            // Update marker
-            if (currentMarker) {
-                currentMarker.setLatLng(position);
-            } else {
-                currentMarker = L.marker(position).addTo(map);
+        // Show live tracking
+        function showLive() {
+            // Remove any existing listener
+            if (currentListener) {
+                database.ref('GPSData').off('child_added', currentListener);
             }
 
-            // Update path
-            coordinates.push(position);
-            if (coordinates.length > maxPathPoints) {
-                coordinates.shift(); // Remove oldest point
-            }
-            pathPolyline.setLatLngs(coordinates);
-
-            // Pan map to new location
-            map.panTo(position);
-
-            // Update info panel
-            const timestamp = new Date().toLocaleTimeString();
-            lastUpdateDiv.textContent = `Last Update: ${timestamp}`;
-            
-            latestPointDiv.innerHTML = `
-                Latitude: ${data.latitude.toFixed(6)}<br>
-                Longitude: ${data.longitude.toFixed(6)}<br>
-                Speed: ${data.speed ? data.speed.toFixed(2) + ' km/h' : 'N/A'}<br>
-                Satellites: ${data.satellites || 'N/A'}<br>
-                Altitude: ${data.altitude ? data.altitude.toFixed(2) + ' m' : 'N/A'}
-            `;
-
-            // Auto zoom on first point
-            if (coordinates.length === 1) {
-                map.setView(position, 15);
-            }
-
-            lastUpdateTime = Date.now();
+            // Set up real-time listener
+            const gpsRef = database.ref('GPSData');
+            currentListener = gpsRef.limitToLast(1).on('child_added', (snapshot) => {
+                const data = snapshot.val();
+                updateMarker(data.latitude, data.longitude);
+            });
         }
 
-        // Check for stale data
-        setInterval(() => {
-            const timeSinceUpdate = Date.now() - lastUpdateTime;
-            if (lastUpdateTime && timeSinceUpdate > 30000) { // 30 seconds
-                statusDiv.className = 'status offline';
-                statusDiv.textContent = 'No updates received recently';
-            }
-        }, 5000);
+        // Load historical data
+        function loadHistoricalData() {
+            const selectedDate = new Date(document.getElementById('dateFilter').value);
+            const nextDate = new Date(selectedDate);
+            nextDate.setDate(nextDate.getDate() + 1);
 
-        // Load initial path
-        gpsRef.limitToLast(maxPathPoints).once('value', (snapshot) => {
-            snapshot.forEach((childSnapshot) => {
-                const data = childSnapshot.val();
-                coordinates.push([data.latitude, data.longitude]);
-            });
-            if (coordinates.length > 0) {
-                pathPolyline.setLatLngs(coordinates);
-                map.fitBounds(pathPolyline.getBounds());
+            // Convert to epoch timestamps
+            const startTime = Math.floor(selectedDate.getTime() / 1000);
+            const endTime = Math.floor(nextDate.getTime() / 1000);
+
+            // Remove live listener if exists
+            if (currentListener) {
+                database.ref('GPSData').off('child_added', currentListener);
             }
-        });
+
+            // Query Firebase for selected date
+            const gpsRef = database.ref('GPSData');
+            gpsRef.orderByChild('timestamp')
+                  .startAt(startTime)
+                  .endAt(endTime)
+                  .limitToLast(1)
+                  .once('value', (snapshot) => {
+                      snapshot.forEach((childSnapshot) => {
+                          const data = childSnapshot.val();
+                          updateMarker(data.latitude, data.longitude);
+                      });
+                  });
+        }
+
+        // Update marker position
+        function updateMarker(lat, lng) {
+            const position = [parseFloat(lat), parseFloat(lng)];
+            
+            if (!marker) {
+                marker = L.marker(position).addTo(map);
+            } else {
+                marker.setLatLng(position);
+            }
+            
+            map.setView(position, 15);
+        }
+
+        // Set default date to today
+        document.getElementById('dateFilter').valueAsDate = new Date();
+
+        // Start with live tracking
+        showLive();
     </script>
 </body>
 </html>
