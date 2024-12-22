@@ -35,10 +35,31 @@
             margin-top: 10px;
             color: #666;
         }
+        .config-form {
+            margin: 10px 0;
+            padding: 10px;
+            background: #eef;
+            border-radius: 4px;
+        }
+        .config-form input {
+            width: 300px;
+            padding: 5px;
+            margin: 5px 0;
+        }
     </style>
 </head>
 <body>
-    <div class="controls">
+    <div class="config-form">
+        <div>
+            <input type="text" id="firebaseHost" placeholder="Firebase Host (e.g., your-project.firebaseio.com)">
+        </div>
+        <div>
+            <input type="text" id="firebaseAuth" placeholder="Firebase Auth Token">
+        </div>
+        <button onclick="initializeFirebase()">Connect to Firebase</button>
+    </div>
+
+    <div class="controls" style="display: none;">
         <input type="datetime-local" id="startTime">
         <input type="datetime-local" id="endTime">
         <button onclick="loadHistory()">Show History</button>
@@ -47,13 +68,9 @@
     <div id="map"></div>
 
     <script>
-        // Initialize Firebase
-        const firebaseConfig = {
-            // Replace with your Firebase config
-            databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app"
-        };
-        firebase.initializeApp(firebaseConfig);
-
+        let firebaseApp;
+        let gpsRef;
+        
         // Initialize map
         const map = L.map('map').setView([9.436471333, 77.567925667], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -63,40 +80,82 @@
         // Create marker and path
         let marker = L.marker([9.436471333, 77.567925667]).addTo(map);
         let path = L.polyline([], {color: 'red', weight: 3}).addTo(map);
+
+        function initializeFirebase() {
+            const host = document.getElementById('firebaseHost').value.trim();
+            const auth = document.getElementById('firebaseAuth').value.trim();
+
+            if (!host || !auth) {
+                updateStatus('Please enter both Firebase host and auth token');
+                return;
+            }
+
+            // Initialize Firebase with full configuration
+            const firebaseConfig = {
+                databaseURL: `https://${host}`,
+                authDomain: `${host}`,
+            };
+
+            try {
+                // Initialize Firebase
+                if (firebaseApp) {
+                    firebase.app().delete();
+                }
+                firebaseApp = firebase.initializeApp(firebaseConfig);
+                
+                // Initialize database reference
+                gpsRef = firebase.database().ref('GPSData');
+                
+                // Start real-time updates
+                setupRealtimeUpdates();
+                
+                // Show controls
+                document.querySelector('.controls').style.display = 'block';
+                updateStatus('Connected to Firebase successfully');
+            } catch (error) {
+                console.error('Firebase initialization error:', error);
+                updateStatus('Error connecting to Firebase: ' + error.message);
+            }
+        }
+
+        function setupRealtimeUpdates() {
+            gpsRef.limitToLast(1).on('child_added', (snapshot) => {
+                const data = snapshot.val();
+                if (!data.latitude || !data.longitude) return;
+                
+                const position = [data.latitude, data.longitude];
+                marker.setLatLng(position);
+                marker.bindPopup(`
+                    Lat: ${data.latitude.toFixed(6)}<br>
+                    Lng: ${data.longitude.toFixed(6)}<br>
+                    Alt: ${data.altitude}m<br>
+                    Speed: ${data.speed}km/h<br>
+                    Satellites: ${data.satellites}
+                `).openPopup();
+                
+                map.panTo(position);
+            }, (error) => {
+                updateStatus('Real-time update error: ' + error.message);
+            });
+        }
         
-        // Status display function
         function updateStatus(message) {
             document.getElementById('status').textContent = message;
         }
 
-        // Real-time updates
-        const gpsRef = firebase.database().ref('GPSData');
-        gpsRef.limitToLast(1).on('child_added', (snapshot) => {
-            const data = snapshot.val();
-            const position = [data.latitude, data.longitude];
-            
-            marker.setLatLng(position);
-            marker.bindPopup(`
-                Lat: ${data.latitude.toFixed(6)}<br>
-                Lng: ${data.longitude.toFixed(6)}<br>
-                Alt: ${data.altitude}m<br>
-                Speed: ${data.speed}km/h<br>
-                Satellites: ${data.satellites}
-            `).openPopup();
-            
-            map.panTo(position);
-        });
-
-        // Load historical data
         function loadHistory() {
+            if (!gpsRef) {
+                updateStatus('Please connect to Firebase first');
+                return;
+            }
+
             updateStatus('Loading historical data...');
-            path.setLatLngs([]); // Clear existing path
+            path.setLatLngs([]);
             
             const startTime = new Date(document.getElementById('startTime').value).getTime();
             const endTime = new Date(document.getElementById('endTime').value).getTime();
 
-            // Query Firebase for the specific time range
-            gpsRef.orderByKey()  // Using orderByKey since your paths use timestamps as keys
+            gpsRef.orderByKey()
                 .startAt(startTime.toString())
                 .endAt(endTime.toString())
                 .once('value')
@@ -122,11 +181,11 @@
                 })
                 .catch((error) => {
                     console.error('Error loading historical data:', error);
-                    updateStatus('Error loading historical data');
+                    updateStatus('Error loading historical data: ' + error.message);
                 });
         }
 
-        // Set default time range (last 24 hours)
+        // Set default time range
         const now = new Date();
         const yesterday = new Date(now - 24*60*60*1000);
         document.getElementById('startTime').value = yesterday.toISOString().slice(0,16);
