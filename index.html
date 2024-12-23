@@ -33,8 +33,8 @@
         </tbody>
     </table>
 
-    <script src="https://cdn.firebase.com/libs/firebase/9.1.3/firebase-app.js"></script>
-    <script src="https://cdn.firebase.com/libs/firebase/9.1.3/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database.js"></script>
     <script>
         // Initialize Firebase
         const firebaseConfig = {
@@ -47,10 +47,12 @@
   appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
   measurementId: "G-D6KHE5KT14"
         };
-        firebase.initializeApp(firebaseConfig);
+
+        const firebaseApp = firebase.initializeApp(firebaseConfig);
+
+        const db = firebaseApp.database();
 
         // Get a reference to the GPS data
-        const db = firebase.database();
         const gpsDataRef = db.ref("GPSData");
 
         // Populate the table with GPS data
@@ -71,6 +73,8 @@
                 `;
                 gpsDataBody.appendChild(row);
             });
+        }, (error) => {
+            console.error("Error reading data:", error);
         });
     </script>
 </body>
