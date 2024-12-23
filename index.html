@@ -1,61 +1,43 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>GPS Tracking</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.7.1/firebase-database-compat.js"></script>
+    <title>GPS Data</title>
     <style>
-        body { 
-            margin: 0; 
-            padding: 0; 
-            font-family: Arial, sans-serif;
+        table {
+            border-collapse: collapse;
         }
-        #map { 
-            height: 100vh;
-            width: 100vw;
-        }
-        .date-selector {
-            position: fixed;
-            top: 10px;
-            left: 50px;
-            background: white;
+        th, td {
+            border: 1px solid #ddd;
             padding: 10px;
-            border-radius: 4px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            z-index: 1000;
-        }
-        input[type="date"] {
-            padding: 5px;
-            margin-right: 5px;
-        }
-        button {
-            padding: 5px 10px;
-            background: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background: #45a049;
+            text-align: left;
         }
     </style>
 </head>
 <body>
-    <div class="date-selector">
-        <input type="date" id="dateFilter">
-        <button onclick="loadHistoricalData()">Historical</button>
-        <button onclick="showLive()">Live</button>
-    </div>
-    <div id="map"></div>
+    <h1>GPS Data</h1>
+    <table id="gps-data-table">
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>Latitude</th>
+                <th>Longitude</th>
+                <th>Altitude</th>
+                <th>Speed</th>
+                <th>Satellites</th>
+            </tr>
+        </thead>
+        <tbody id="gps-data-body">
+            <!-- Data will be populated here -->
+        </tbody>
+    </table>
 
+    <script src="https://cdn.firebase.com/libs/firebase/9.1.3/firebase-app.js"></script>
+    <script src="https://cdn.firebase.com/libs/firebase/9.1.3/firebase-database.js"></script>
     <script>
         // Initialize Firebase
         const firebaseConfig = {
-            // Replace with your Firebase config
             apiKey: "AIzaSyCQmODNdyNeNEXJXB_7u-8versZmrXYJRU",
   authDomain: "vehicle-tracking-7f1dd.firebaseapp.com",
   databaseURL: "https://vehicle-tracking-7f1dd-default-rtdb.asia-southeast1.firebasedatabase.app",
@@ -65,81 +47,31 @@
   appId: "1:876631887074:web:2d9e7e1bd54f2d603b22bb",
   measurementId: "G-D6KHE5KT14"
         };
-        
         firebase.initializeApp(firebaseConfig);
-        const database = firebase.database();
 
-        // Initialize map
-        const map = L.map('map').setView([0, 0], 2);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+        // Get a reference to the GPS data
+        const db = firebase.database();
+        const gpsDataRef = db.ref("GPSData");
 
-        let marker = null;
-        let currentListener = null;
+        // Populate the table with GPS data
+        gpsDataRef.on("value", (data) => {
+            const gpsDataBody = document.getElementById("gps-data-body");
+            gpsDataBody.innerHTML = "";
 
-        // Show live tracking
-        function showLive() {
-            // Remove any existing listener
-            if (currentListener) {
-                database.ref('GPSData').off('child_added', currentListener);
-            }
-
-            // Set up real-time listener
-            const gpsRef = database.ref('GPSData');
-            currentListener = gpsRef.limitToLast(1).on('child_added', (snapshot) => {
-                const data = snapshot.val();
-                updateMarker(data.latitude, data.longitude);
+            data.forEach((childSnapshot) => {
+                const childData = childSnapshot.val();
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${childData.timestamp}</td>
+                    <td>${childData.latitude}</td>
+                    <td>${childData.longitude}</td>
+                    <td>${childData.altitude}</td>
+                    <td>${childData.speed}</td>
+                    <td>${childData.satellites}</td>
+                `;
+                gpsDataBody.appendChild(row);
             });
-        }
-
-        // Load historical data
-        function loadHistoricalData() {
-            const selectedDate = new Date(document.getElementById('dateFilter').value);
-            const nextDate = new Date(selectedDate);
-            nextDate.setDate(nextDate.getDate() + 1);
-
-            // Convert to epoch timestamps
-            const startTime = Math.floor(selectedDate.getTime() / 1000);
-            const endTime = Math.floor(nextDate.getTime() / 1000);
-
-            // Remove live listener if exists
-            if (currentListener) {
-                database.ref('GPSData').off('child_added', currentListener);
-            }
-
-            // Query Firebase for selected date
-            const gpsRef = database.ref('GPSData');
-            gpsRef.orderByChild('timestamp')
-                  .startAt(startTime)
-                  .endAt(endTime)
-                  .limitToLast(1)
-                  .once('value', (snapshot) => {
-                      snapshot.forEach((childSnapshot) => {
-                          const data = childSnapshot.val();
-                          updateMarker(data.latitude, data.longitude);
-                      });
-                  });
-        }
-
-        // Update marker position
-        function updateMarker(lat, lng) {
-            const position = [parseFloat(lat), parseFloat(lng)];
-            
-            if (!marker) {
-                marker = L.marker(position).addTo(map);
-            } else {
-                marker.setLatLng(position);
-            }
-            
-            map.setView(position, 15);
-        }
-
-        // Set default date to today
-        document.getElementById('dateFilter').valueAsDate = new Date();
-
-        // Start with live tracking
-        showLive();
+        });
     </script>
 </body>
 </html>
